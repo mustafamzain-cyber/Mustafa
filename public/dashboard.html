@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Restaurant Dashboard</title>
+
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+
+<body>
+
+    <header class="topbar">
+
+        <div>
+            <h1>Restaurant Dashboard</h1>
+            <span id="restaurantName">Loading...</span>
+        </div>
+
+        <button
+            class="logout-button"
+            onclick="logout()">
+            Logout
+        </button>
+
+    </header>
+
+
+    <main class="dashboard">
+
+        <!-- Statistics -->
+
+        <section class="stats">
+
+            <div class="stat-card">
+                <span>Total Orders</span>
+                <strong id="totalOrders">0</strong>
+            </div>
+
+            <div class="stat-card pending">
+                <span>Pending</span>
+                <strong id="pendingOrders">0</strong>
+            </div>
+
+            <div class="stat-card confirmed">
+                <span>Confirmed</span>
+                <strong id="confirmedOrders">0</strong>
+            </div>
+
+            <div class="stat-card cancelled">
+                <span>Cancelled</span>
+                <strong id="cancelledOrders">0</strong>
+            </div>
+
+        </section>
+
+
+        <!-- Orders -->
+
+        <section class="orders-section">
+
+            <div class="section-header">
+
+                <div>
+                    <h2>Orders</h2>
+                    <p>Manage your restaurant orders</p>
+                </div>
+
+                <button
+                    class="refresh-button"
+                    onclick="loadOrders()">
+                    ↻ Refresh
+                </button>
+
+            </div>
+
+
+            <div id="message"></div>
+
+
+            <div class="table-container">
+
+                <table>
+
+                    <thead>
+
+                        <tr>
+                            <th>Order</th>
+                            <th>Customer</th>
+                            <th>Phone</th>
+                            <th>Total</th>
+                            <th>Status</th>
+                            <th>Notes</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+
+                    </thead>
+
+                    <tbody id="ordersTable">
+
+                        <tr>
+                            <td colspan="8" class="loading">
+                                Loading orders...
+                            </td>
+                        </tr>
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        </section>
+
+    </main>
+
+
+    <script src="/js/dashboard.js"></script>
+
+</body>
+
+</html>

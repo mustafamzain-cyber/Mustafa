@@ -1,0 +1,40 @@
+{
+  "name": "delivery-system",
+  "version": "1.0.0",
+  "description": "A delivery system for managing orders and deliveries.",
+  "main": "src/app.ts",
+  "scripts": {
+    "start": "ts-node src/app.ts",
+    "build": "tsc",
+    "test": "jest"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "body-parser": "^2.3.0",
+    "dotenv": "^8.2.0",
+    "express": "^4.17.1",
+    "jsonwebtoken": "^8.5.1",
+    "mongoose": "^5.10.9",
+    "mysql2": "^3.23.3",
+    "sequelize": "^6.37.8",
+    "tedious": "^20.0.0",
+    "winston": "^3.19.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/express": "^4.17.8",
+    "@types/jest": "^26.0.24",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^14.14.31",
+    "jest": "^26.6.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^4.1.2"
+  },
+  "keywords": [
+    "delivery",
+    "orders",
+    "system"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}
