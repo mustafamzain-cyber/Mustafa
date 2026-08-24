@@ -1,5 +1,7 @@
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { AuthService } from '../services/auth.service';
+import { asyncHandler } from '../middleware/error.middleware';
+import logger from '../utils/logger';
 
 export class AuthController {
     private authService: AuthService;
@@ -8,54 +10,66 @@ export class AuthController {
         this.authService = new AuthService();
     }
 
-    public register = async (
-        req: Request,
-        res: Response
-    ): Promise<void> => {
-        try {
-            const userData = req.body;
+    /**
+     * Register a new user
+     */
+    public register = asyncHandler(
+        async (req: Request, res: Response, next: NextFunction) => {
+            try {
+                const result = await this.authService.register(req.body);
 
-            const newUser =
-                await this.authService.register(userData);
+                res.status(201).json({
+                    success: true,
+                    message: 'User registered successfully',
+                    data: result,
+                    statusCode: 201,
+                });
+            } catch (error) {
+                next(error);
+            }
+        },
+    );
 
-            res.status(201).json(newUser);
-        } catch (error) {
-            const message =
-                error instanceof Error
-                    ? error.message
-                    : 'Registration failed';
+    /**
+     * Login user
+     */
+    public login = asyncHandler(
+        async (req: Request, res: Response, next: NextFunction) => {
+            try {
+                const { email, password } = req.body;
+                const token = await this.authService.login(email, password);
 
-            res.status(400).json({
-                message,
-            });
-        }
-    };
+                res.status(200).json({
+                    success: true,
+                    message: 'Login successful',
+                    data: { token },
+                    statusCode: 200,
+                });
+            } catch (error) {
+                next(error);
+            }
+        },
+    );
 
-    public login = async (
-        req: Request,
-        res: Response
-    ): Promise<void> => {
-        try {
-            const { email, password } = req.body;
-
-            const token =
-                await this.authService.login(
-                    email,
-                    password
+    /**
+     * Get current user profile
+     */
+    public getProfile = asyncHandler(
+        async (req: Request, res: Response, next: NextFunction) => {
+            try {
+                const user = await this.authService.getUserById(
+                    (req as any).user.id,
                 );
 
-            res.status(200).json({
-                token,
-            });
-        } catch (error) {
-            const message =
-                error instanceof Error
-                    ? error.message
-                    : 'Login failed';
-
-            res.status(401).json({
-                message,
-            });
-        }
-    };
+                res.status(200).json({
+                    success: true,
+                    message: 'Profile retrieved successfully',
+                    data: user,
+                    statusCode: 200,
+                });
+            } catch (error) {
+                next(error);
+            }
+        },
+    );
 }
