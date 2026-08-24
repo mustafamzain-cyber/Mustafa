@@ -1,462 +1,269 @@
-import { database } from '../config/database';
-
-export interface Order {
-    OrderID: number;
-    OrderNumber: string;
-    CustomerID: number;
-    RestaurantID: number;
-    AddressID: number;
-    OrderStatus: string;
-    SubTotal: number;
-    DeliveryFee: number;
-    DiscountAmount: number;
-    TaxAmount: number;
-    TotalAmount: number;
-    CustomerNotes?: string;
-    CreatedAt?: Date;
-    ConfirmedAt?: Date;
-    CompletedAt?: Date;
-    CancelledAt?: Date;
-}
+import { Order, User, Delivery } from '../models';
+import { ICreateOrderRequest, IUpdateOrderRequest, OrderStatus } from '../types';
+import { ValidationError, NotFoundError, UnauthorizedError } from '../utils/errors';
+import { validateCreateOrderRequest } from '../utils/validators';
+import logger from '../utils/logger';
 
 export class OrderService {
-
-    /*
+    /**
      * Create a new order
      */
-    public async createOrder(orderData: any): Promise<any> {
+    public async createOrder(
+        customerId: string,
+        data: ICreateOrderRequest,
+    ): Promise<any> {
+        try {
+            // Validate input
+            validateCreateOrderRequest(data);
 
-        const {
-            CustomerID,
-            RestaurantID,
-            AddressID,
-            OrderNumber,
-            CustomerNotes,
-            SubTotal = 0,
-            DeliveryFee = 0,
-            DiscountAmount = 0,
-            TaxAmount = 0,
-            TotalAmount = 0
-        } = orderData;
+            // Calculate total amount
+            const totalAmount = data.items.reduce(
+                (sum, item) => sum + item.totalPrice,
+                0,
+            );
 
-        const [result]: any = await database.query(
-            `
-            INSERT INTO dbo.Orders
-            (
-                OrderNumber,
-                CustomerID,
-                RestaurantID,
-                AddressID,
-                OrderStatus,
-                SubTotal,
-                DeliveryFee,
-                DiscountAmount,
-                TaxAmount,
-                TotalAmount,
-                CustomerNotes
-            )
-            OUTPUT INSERTED.*
-            VALUES
-            (
-                :OrderNumber,
-                :CustomerID,
-                :RestaurantID,
-                :AddressID,
-                'Pending',
-                :SubTotal,
-                :DeliveryFee,
-                :DiscountAmount,
-                :TaxAmount,
-                :TotalAmount,
-                :CustomerNotes
-            )
-            `,
-            {
-                replacements: {
-                    OrderNumber:
-                        OrderNumber ||
-                        `ORD-${Date.now()}`,
+            // Create order
+            const order = await Order.create({
+                customerId,
+                items: data.items,
+                totalAmount,
+                paymentMethod: data.paymentMethod,
+                paymentStatus: 'pending',
+                status: OrderStatus.PENDING,
+                notes: data.notes,
+            });
 
-                    CustomerID,
-                    RestaurantID,
-                    AddressID,
-                    SubTotal,
-                    DeliveryFee,
-                    DiscountAmount,
-                    TaxAmount,
-                    TotalAmount,
-                    CustomerNotes
-                }
-            }
-        );
+            logger.info(`Order created: ${order.id}`);
 
-        return result[0];
+            return order.toJSON();
+        } catch (error) {
+            logger.error(
+                `Create order error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            );
+            throw error;
+        }
     }
 
-
-    /*
-     * Get orders according to logged-in user's role
+    /**
+     * Get all orders for a user
      */
     public async getOrdersForUser(
-        user: any
-    ): Promise<any[]> {
+        userId: string,
+        page: number = 1,
+        limit: number = 10,
+    ): Promise<any> {
+        try {
+            const offset = (page - 1) * limit;
 
-        const role = user.role;
-
-        let whereClause = '';
-
-        const replacements: any = {};
-
-        /*
-         * Restaurant
-         */
-        if (role === 'restaurant') {
-
-            const [restaurants]: any =
-                await database.query(
-                    `
-                    SELECT RestaurantID
-                    FROM dbo.UserRestaurants
-                    WHERE UserID = :UserID
-                    `,
+            const { count, rows } = await Order.findAndCountAll({
+                where: { customerId: userId },
+                include: [
                     {
-                        replacements: {
-                            UserID: Number(user.id)
-                        }
-                    }
-                );
+                        model: Delivery,
+                        as: 'delivery',
+                    },
+                ],
+                limit,
+                offset,
+                order: [['createdAt', 'DESC']],
+            });
 
-            if (restaurants.length === 0) {
-                return [];
-            }
-
-            const restaurantIds =
-                restaurants.map(
-                    (r: any) =>
-                        Number(r.RestaurantID)
-                );
-
-            whereClause =
-                `WHERE o.RestaurantID IN (${restaurantIds.join(',')})`;
-        }
-
-        /*
-         * Customer
-         */
-        else if (role === 'customer') {
-
-            if (!user.customerId) {
-                return [];
-            }
-
-            whereClause =
-                `WHERE o.CustomerID = :CustomerID`;
-
-            replacements.CustomerID =
-                Number(user.customerId);
-        }
-
-        /*
-         * Driver
-         */
-        else if (role === 'driver') {
-
-            whereClause = `
-                INNER JOIN dbo.Deliveries d
-                    ON d.OrderID = o.OrderID
-                WHERE d.DriverID = :DriverID
-            `;
-
-            replacements.DriverID =
-                Number(
-                    user.driverId ||
-                    user.id
-                );
-        }
-
-        /*
-         * Admin
-         */
-        else if (role === 'admin') {
-
-            whereClause = '';
-        }
-
-        /*
-         * Unknown role
-         */
-        else {
-
-            return [];
-        }
-
-        const [orders]: any =
-            await database.query(
-                `
-                SELECT
-                    o.*,
-                    c.FullName AS CustomerName,
-                    c.Phone AS CustomerPhone,
-                    r.RestaurantName
-
-                FROM dbo.Orders o
-
-                INNER JOIN dbo.Customers c
-                    ON o.CustomerID = c.CustomerID
-
-                INNER JOIN dbo.Restaurants r
-                    ON o.RestaurantID = r.RestaurantID
-
-                ${whereClause}
-
-                ORDER BY o.CreatedAt DESC
-                `,
-                {
-                    replacements
-                }
+            return {
+                data: rows,
+                pagination: {
+                    page,
+                    limit,
+                    total: count,
+                    pages: Math.ceil(count / limit),
+                },
+            };
+        } catch (error) {
+            logger.error(
+                `Get orders error: ${error instanceof Error ? error.message : 'Unknown error'}`,
             );
-
-        return orders;
+            throw error;
+        }
     }
 
-
-    /*
-     * Get one order according to user's permissions
-     * including customer, restaurant, address and items
+    /**
+     * Get order by ID
      */
-    public async getOrderByIdForUser(
-        orderId: number,
-        user: any
-    ): Promise<any | null> {
+    public async getOrderById(
+        orderId: string,
+        userId?: string,
+    ): Promise<any> {
+        try {
+            const order = await Order.findByPk(orderId, {
+                include: [
+                    {
+                        model: Delivery,
+                        as: 'delivery',
+                    },
+                ],
+            });
 
-        /*
-         * First check whether the user has
-         * permission to access this order.
-         */
-        const existingOrders =
-            await this.getOrdersForUser(user);
-
-        const existingOrder =
-            existingOrders.find(
-                (item: any) =>
-                    Number(item.OrderID) ===
-                    Number(orderId)
-            );
-
-        if (!existingOrder) {
-            return null;
-        }
-
-
-        /*
-         * Get complete order information
-         */
-        const [orderDetails]: any =
-            await database.query(
-                `
-                SELECT
-                    o.*,
-
-                    c.FullName AS CustomerName,
-                    c.Phone AS CustomerPhone,
-
-                    r.RestaurantName,
-
-                    ca.AddressName,
-                    ca.Province,
-                    ca.District,
-                    ca.Sector,
-                    ca.Cell,
-                    ca.StreetAddress,
-                    ca.Latitude,
-                    ca.Longitude
-
-                FROM dbo.Orders o
-
-                INNER JOIN dbo.Customers c
-                    ON o.CustomerID = c.CustomerID
-
-                INNER JOIN dbo.Restaurants r
-                    ON o.RestaurantID = r.RestaurantID
-
-                INNER JOIN dbo.CustomerAddresses ca
-                    ON o.AddressID = ca.AddressID
-
-                WHERE o.OrderID = :OrderID
-                `,
-                {
-                    replacements: {
-                        OrderID: orderId
-                    }
-                }
-            );
-
-
-        if (orderDetails.length === 0) {
-            return null;
-        }
-
-
-        const detailedOrder =
-            orderDetails[0];
-
-
-        /*
-         * Get order items
-         */
-        const [items]: any =
-            await database.query(
-                `
-                SELECT
-                    oi.OrderItemID,
-                    oi.OrderID,
-                    oi.MenuItemID,
-                    oi.ItemName,
-                    oi.Quantity,
-                    oi.UnitPrice,
-                    oi.TotalPrice,
-                    oi.SpecialInstructions
-
-                FROM dbo.OrderItems oi
-
-                WHERE oi.OrderID = :OrderID
-
-                ORDER BY oi.OrderItemID
-                `,
-                {
-                    replacements: {
-                        OrderID: orderId
-                    }
-                }
-            );
-
-
-        /*
-         * Attach items to order
-         */
-        detailedOrder.Items = items;
-
-
-        return detailedOrder;
-    }
-
-
-    /*
-     * Update order according to user's permissions
-     */
-    public async updateOrderForUser(
-        orderId: number,
-        updateData: any,
-        user: any
-    ): Promise<any | null> {
-
-        const existingOrder =
-            await this.getOrderByIdForUser(
-                orderId,
-                user
-            );
-
-        if (!existingOrder) {
-            return null;
-        }
-
-
-        const allowedFields = [
-            'OrderStatus',
-            'CustomerNotes',
-            'SubTotal',
-            'DeliveryFee',
-            'DiscountAmount',
-            'TaxAmount',
-            'TotalAmount'
-        ];
-
-
-        const fields: string[] = [];
-
-        const replacements: any = {
-            OrderID: orderId
-        };
-
-
-        for (const field of allowedFields) {
-
-            if (
-                updateData[field] !==
-                undefined
-            ) {
-
-                fields.push(
-                    `${field} = :${field}`
-                );
-
-                replacements[field] =
-                    updateData[field];
+            if (!order) {
+                throw new NotFoundError('Order not found');
             }
-        }
 
+            // Check authorization
+            if (userId && order.customerId !== userId) {
+                throw new UnauthorizedError('You do not have access to this order');
+            }
 
-        if (fields.length === 0) {
-            return existingOrder;
-        }
-
-
-        const [result]: any =
-            await database.query(
-                `
-                UPDATE dbo.Orders
-
-                SET ${fields.join(', ')}
-
-                OUTPUT INSERTED.*
-
-                WHERE OrderID = :OrderID
-                `,
-                {
-                    replacements
-                }
+            return order.toJSON();
+        } catch (error) {
+            logger.error(
+                `Get order error: ${error instanceof Error ? error.message : 'Unknown error'}`,
             );
-
-
-        return result.length > 0
-            ? result[0]
-            : null;
+            throw error;
+        }
     }
 
-
-    /*
-     * Delete order according to user's permissions
+    /**
+     * Update order
      */
-    public async deleteOrderForUser(
-        orderId: number,
-        user: any
-    ): Promise<boolean> {
+    public async updateOrder(
+        orderId: string,
+        data: IUpdateOrderRequest,
+        userId?: string,
+    ): Promise<any> {
+        try {
+            const order = await Order.findByPk(orderId);
 
-        const existingOrder =
-            await this.getOrderByIdForUser(
-                orderId,
-                user
+            if (!order) {
+                throw new NotFoundError('Order not found');
+            }
+
+            // Check authorization
+            if (userId && order.customerId !== userId) {
+                throw new UnauthorizedError('You do not have access to this order');
+            }
+
+            // Update order
+            if (data.status) order.status = data.status;
+            if (data.notes) order.notes = data.notes;
+            if (data.paymentStatus) order.paymentStatus = data.paymentStatus;
+
+            await order.save();
+
+            logger.info(`Order updated: ${order.id}`);
+
+            return order.toJSON();
+        } catch (error) {
+            logger.error(
+                `Update order error: ${error instanceof Error ? error.message : 'Unknown error'}`,
             );
-
-        if (!existingOrder) {
-            return false;
+            throw error;
         }
+    }
 
+    /**
+     * Delete order
+     */
+    public async deleteOrder(orderId: string, userId?: string): Promise<boolean> {
+        try {
+            const order = await Order.findByPk(orderId);
 
-        const [result]: any =
-            await database.query(
-                `
-                DELETE FROM dbo.Orders
-                WHERE OrderID = :OrderID
-                `,
-                {
-                    replacements: {
-                        OrderID: orderId
-                    }
-                }
+            if (!order) {
+                throw new NotFoundError('Order not found');
+            }
+
+            // Check authorization
+            if (userId && order.customerId !== userId) {
+                throw new UnauthorizedError('You do not have access to this order');
+            }
+
+            // Only allow deleting pending orders
+            if (order.status !== OrderStatus.PENDING) {
+                throw new ValidationError('Can only delete pending orders');
+            }
+
+            await order.destroy();
+
+            logger.info(`Order deleted: ${orderId}`);
+
+            return true;
+        } catch (error) {
+            logger.error(
+                `Delete order error: ${error instanceof Error ? error.message : 'Unknown error'}`,
             );
+            throw error;
+        }
+    }
 
+    /**
+     * Cancel order
+     */
+    public async cancelOrder(orderId: string, userId?: string): Promise<any> {
+        try {
+            const order = await Order.findByPk(orderId);
 
-        return result[1] > 0;
+            if (!order) {
+                throw new NotFoundError('Order not found');
+            }
+
+            // Check authorization
+            if (userId && order.customerId !== userId) {
+                throw new UnauthorizedError('You do not have access to this order');
+            }
+
+            // Check if order can be cancelled
+            const canBeCancelled = [
+                OrderStatus.PENDING,
+                OrderStatus.CONFIRMED,
+                OrderStatus.PROCESSING,
+            ].includes(order.status);
+
+            if (!canBeCancelled) {
+                throw new ValidationError('Order cannot be cancelled in its current status');
+            }
+
+            order.status = OrderStatus.CANCELLED;
+            await order.save();
+
+            logger.info(`Order cancelled: ${orderId}`);
+
+            return order.toJSON();
+        } catch (error) {
+            logger.error(
+                `Cancel order error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            );
+            throw error;
+        }
+    }
+
+    /**
+     * Get order statistics
+     */
+    public async getOrderStats(userId: string): Promise<any> {
+        try {
+            const orders = await Order.findAll({
+                where: { customerId: userId },
+            });
+
+            const totalOrders = orders.length;
+            const totalSpent = orders.reduce((sum, order) => sum + Number(order.totalAmount), 0);
+            const averageOrderValue = totalOrders > 0 ? totalSpent / totalOrders : 0;
+            const completedOrders = orders.filter(
+                (o) => o.status === OrderStatus.DELIVERED,
+            ).length;
+            const cancelledOrders = orders.filter(
+                (o) => o.status === OrderStatus.CANCELLED,
+            ).length;
+
+            return {
+                totalOrders,
+                totalSpent,
+                averageOrderValue,
+                completedOrders,
+                cancelledOrders,
+            };
+        } catch (error) {
+            logger.error(
+                `Get order stats error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            );
+            throw error;
+        }
     }
 }
